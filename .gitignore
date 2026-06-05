@@ -1,0 +1,44 @@
+# build directories
+build/
+cmake-build-*/
+out/
+bin/
+
+# object / dependency files
+*.o
+*.o.d
+*.obj
+
+# libraries
+*.a
+*.so
+*.dll
+*.dylib
+
+# executables / debug outputs
+*.exe
+*.out
+*.run
+
+# CMake generated
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+
+# clangd / cache
+.cache/
+.clangd-index/
+compile_commands.json
+
+# VS Code cache
+.vscode/ipch/
+
+# logs / temp
+*.log
+*.tmp
+*.bak
+.DS_Store
+
+# env / secrets
+.env
+.env.local

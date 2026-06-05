@@ -1,0 +1,17 @@
+  242 handle/hancle_read.c
+  295 handle/handle.c
+   54 handle/handle_core.h
+   51 handle/handle.h
+   32 handle/handle_read.h
+   37 handle/handle_write.c
+   13 handle/handle_write.h
+  282 handle/http_response.c
+   24 handle/http_response.h
+   41 memop/manage.c
+   40 memop/manage.h
+  175 util/wsx_string.c
+   70 util/wsx_string.h
+   23 main.c
+   72 read_config.c
+   30 read_config.h
+ 1481 总用量

@@ -1,0 +1,50 @@
+{
+  "C_Cpp.intelliSenseEngine": "disabled",
+
+  "clangd.path": "/usr/bin/clangd",
+  "clangd.arguments": [
+    "--background-index"
+  ],
+
+  "files.associations": {
+    "*.h": "cpp",
+    "*.hpp": "cpp"
+  },
+
+  "[cpp]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "xaver.clang-format"
+  },
+  "[c]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "xaver.clang-format"
+  },
+  "[h]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "xaver.clang-format"
+  },
+  "[hpp]": {
+    "editor.formatOnSave": true,
+    "editor.defaultFormatter": "xaver.clang-format"
+  },
+
+  "[markdown]": {
+    "editor.wordWrap": "on",
+    "editor.formatOnSave": false
+  },
+  "[yaml]": {
+    "editor.formatOnSave": false
+  },
+  "[json]": {
+    "editor.formatOnSave": false
+  },
+  "[jsonc]": {
+    "editor.formatOnSave": false
+  },
+
+  "editor.tabSize": 4,
+  "editor.insertSpaces": true,
+  "editor.rulers": [100],
+
+  "terminal.integrated.defaultProfile.linux": "bash",
+}
