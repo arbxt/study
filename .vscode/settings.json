@@ -47,4 +47,5 @@
   "editor.rulers": [100],
 
   "terminal.integrated.defaultProfile.linux": "bash",
+  "remote.autoForwardPortsFallback": 0,
 }
