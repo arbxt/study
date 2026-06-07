@@ -48,4 +48,7 @@
 
   "terminal.integrated.defaultProfile.linux": "bash",
   "remote.autoForwardPortsFallback": 0,
+  "leetcode.endpoint": "leetcode-cn",
+  "leetcode.workspaceFolder": "/home/morgana/study/.leetcode",
+  "leetcode.defaultLanguage": "cpp"
 }
