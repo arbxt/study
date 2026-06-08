@@ -49,6 +49,10 @@
   "terminal.integrated.defaultProfile.linux": "bash",
   "remote.autoForwardPortsFallback": 0,
   "leetcode.endpoint": "leetcode-cn",
-  "leetcode.workspaceFolder": "/home/morgana/study/.leetcode",
-  "leetcode.defaultLanguage": "cpp"
+  "leetcode.workspaceFolder": "/home/morgana/study/leetcode",
+  "leetcode.defaultLanguage": "cpp",
+  "leetcode.hideSolved": true,
+  "leetcode.hint.commentDescription": false,
+  "leetcode.hint.commandShortcut": false,
+  "leetcode.hint.configWebviewMarkdown": false
 }

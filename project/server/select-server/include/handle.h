@@ -1,3 +1,3 @@
 #pragma once
 
-void handle(int client_fd);
+bool handle(int client_fd);

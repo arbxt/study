@@ -1,0 +1,26 @@
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -Wall
+    - -Wextra
+    - -Wno-unused-variable
+    - -Wno-unused-parameter
+    - -Wno-unused-function
+    - -Wno-unused-but-set-variable
+    - -Wno-sign-compare
+    - -Wno-unknown-pragmas
+    - -Wno-unknown-warning-option
+    - -Wno-format
+    - -Wno-shadow
+
+Diagnostics:
+  Suppress:
+    - unused-includes
+    - missing-includes
+  ClangTidy:
+    Remove:
+      - "*"
+
+InlayHints:
+  ParameterNames: No
+  DeducedTypes: No
