@@ -7,35 +7,35 @@ set -euo pipefail
 # 推荐位置：
 #   ~/study/scripts/setup-leetcode-wsl.sh
 #
-# 目标目录结构：
+# 目标结构：
 #   ~/study
-#   ├── .vscode/settings.json
 #   ├── leetcode/.clangd
 #   └── scripts/setup-leetcode-wsl.sh
+#
+# LeetCode 插件配置写入：
+#   ~/.vscode-server/data/Machine/settings.json
 # ============================================================
 
-# 脚本所在目录，例如 /home/morgana/study/scripts
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-
-# study 根目录，即 scripts 的上一级
 WORKSPACE_DIR="$(cd -- "$SCRIPT_DIR/.." && pwd)"
-
 LEETCODE_DIR="$WORKSPACE_DIR/leetcode"
-VSCODE_SETTINGS_DIR="$WORKSPACE_DIR/.vscode"
-VSCODE_SETTINGS_FILE="$VSCODE_SETTINGS_DIR/settings.json"
+
+REMOTE_USER_SETTINGS_DIR="$HOME/.vscode-server/data/Machine"
+REMOTE_USER_SETTINGS_FILE="$REMOTE_USER_SETTINGS_DIR/settings.json"
 
 EXTENSION_ID="LeetCode.vscode-leetcode"
 
 echo "==> 当前用户: $(whoami)"
 echo "==> HOME: $HOME"
 echo "==> 脚本目录: $SCRIPT_DIR"
-echo "==> 工作区目录: $WORKSPACE_DIR"
+echo "==> study 工作区: $WORKSPACE_DIR"
 echo "==> LeetCode 目录: $LEETCODE_DIR"
+echo "==> VS Code Remote User Settings: $REMOTE_USER_SETTINGS_FILE"
 
 echo
 echo "==> 检查 Node.js"
 if ! command -v node >/dev/null 2>&1; then
-    echo "未找到 node，请先安装 Node.js："
+    echo "未找到 node，请先安装："
     echo "sudo apt update && sudo apt install -y nodejs npm"
     exit 1
 fi
@@ -44,47 +44,42 @@ node -v
 echo
 echo "==> 检查 code 命令"
 if ! command -v code >/dev/null 2>&1; then
-    echo "未找到 code 命令。请先从 Windows VS Code 连接一次 WSL，或确认 VS Code Server 已安装。"
+    echo "未找到 code 命令。请先从 Windows VS Code 连接一次 WSL。"
     exit 1
 fi
 
 echo
 echo "==> 创建目录"
 mkdir -p "$LEETCODE_DIR"
-mkdir -p "$VSCODE_SETTINGS_DIR"
 mkdir -p "$HOME/.local/bin"
+mkdir -p "$REMOTE_USER_SETTINGS_DIR"
 
 echo
 echo "==> 安装或确认 WSL 侧 LeetCode 扩展"
 code --install-extension "$EXTENSION_ID" --force >/dev/null || true
 
 echo
-echo "==> 定位 WSL 侧 LeetCode 扩展目录"
+echo "==> 创建动态 lcv 包装命令"
+
+cat > "$HOME/.local/bin/lcv" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
 EXT_DIR="$(find "$HOME/.vscode-server/extensions" -maxdepth 1 -type d -iname "leetcode.vscode-leetcode-*" 2>/dev/null | sort -V | tail -n 1 || true)"
 
 if [[ -z "$EXT_DIR" ]]; then
-    echo "未找到 WSL 侧 LeetCode 扩展目录。"
-    echo "请在 VS Code WSL 窗口中确认插件安装在 WSL，而不是只安装在 Windows Local。"
+    echo "未找到 WSL 侧 LeetCode 扩展目录：$HOME/.vscode-server/extensions/leetcode.vscode-leetcode-*"
     exit 1
 fi
 
 LCV_BIN="$EXT_DIR/node_modules/vsc-leetcode-cli/bin/leetcode"
 
 if [[ ! -f "$LCV_BIN" ]]; then
-    echo "找到扩展目录，但未找到内置 CLI："
-    echo "$LCV_BIN"
+    echo "未找到 vsc-leetcode-cli：$LCV_BIN"
     exit 1
 fi
 
-echo "扩展目录: $EXT_DIR"
-echo "CLI 路径: $LCV_BIN"
-
-echo
-echo "==> 创建 lcv 包装命令"
-
-cat > "$HOME/.local/bin/lcv" <<EOF
-#!/usr/bin/env bash
-node "$LCV_BIN" "\$@"
+exec node "$LCV_BIN" "$@"
 EOF
 
 chmod +x "$HOME/.local/bin/lcv"
@@ -105,10 +100,101 @@ echo "==> 当前 CLI 插件状态"
 lcv plugin || true
 
 echo
+echo "==> 写入 LeetCode 插件 Remote User Settings"
+
+python3 - "$REMOTE_USER_SETTINGS_FILE" "$LEETCODE_DIR" <<'PY'
+import json
+import os
+import sys
+from pathlib import Path
+
+settings_file = Path(sys.argv[1])
+leetcode_dir = sys.argv[2]
+
+settings_file.parent.mkdir(parents=True, exist_ok=True)
+
+if settings_file.exists():
+    raw = settings_file.read_text(encoding="utf-8").strip()
+    if raw:
+        try:
+            data = json.loads(raw)
+        except json.JSONDecodeError:
+            backup = settings_file.with_suffix(".json.bak")
+            backup.write_text(raw, encoding="utf-8")
+            print(f"原 settings.json 不是合法 JSON，已备份到: {backup}")
+            data = {}
+    else:
+        data = {}
+else:
+    data = {}
+
+# 只写 LeetCode 插件相关配置，避免覆盖你的通用工作区设置
+data["leetcode.endpoint"] = "leetcode-cn"
+data["leetcode.workspaceFolder"] = leetcode_dir
+data["leetcode.defaultLanguage"] = "cpp"
+data["leetcode.filePath"] = {
+    "default": {
+        "folder": "",
+        "filename": "${id}.${kebab-case-name}.${ext}"
+    }
+}
+data["leetcode.hideSolved"] = True
+data["leetcode.hint.commentDescription"] = False
+data["leetcode.hint.commandShortcut"] = False
+data["leetcode.hint.configWebviewMarkdown"] = False
+
+# WSL Remote 中不要启用 useWsl，避免 Windows 本体模式和 Remote 模式混用
+if "leetcode.useWsl" in data:
+    del data["leetcode.useWsl"]
+
+settings_file.write_text(
+    json.dumps(data, ensure_ascii=False, indent=2) + "\n",
+    encoding="utf-8"
+)
+
+print(f"已写入: {settings_file}")
+print(f"leetcode.workspaceFolder = {leetcode_dir}")
+PY
+
+echo
+echo "==> 写入 LeetCode 目录专用 .clangd"
+
+cat > "$LEETCODE_DIR/.clangd" <<'EOF'
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -Wall
+    - -Wextra
+    - -Wno-unused-variable
+    - -Wno-unused-parameter
+    - -Wno-unused-function
+    - -Wno-unused-but-set-variable
+    - -Wno-sign-compare
+    - -Wno-unknown-pragmas
+    - -Wno-unknown-warning-option
+    - -Wno-format
+    - -Wno-shadow
+
+Diagnostics:
+  Suppress:
+    - unused-includes
+    - missing-includes
+  ClangTidy:
+    Remove:
+      - "*"
+
+InlayHints:
+  ParameterNames: No
+  DeducedTypes: No
+EOF
+
+echo "已写入: $LEETCODE_DIR/.clangd"
+
+echo
 echo "========================================"
 echo "准备登录 leetcode.cn"
 echo
-echo "1. 在 Windows 浏览器中打开："
+echo "1. Windows 浏览器打开："
 echo "   https://leetcode.cn"
 echo
 echo "2. 确认已登录"
@@ -146,119 +232,16 @@ echo "==> 验证登录状态"
 lcv user
 
 echo
-echo "==> 写入 study 工作区 VS Code 配置"
-cat > "$VSCODE_SETTINGS_FILE" <<EOF
-{
-  "C_Cpp.intelliSenseEngine": "disabled",
-
-  "clangd.path": "/usr/bin/clangd",
-  "clangd.arguments": [
-    "--background-index"
-  ],
-
-  "files.associations": {
-    "*.h": "cpp",
-    "*.hpp": "cpp"
-  },
-
-  "[cpp]": {
-    "editor.formatOnSave": true,
-    "editor.defaultFormatter": "xaver.clang-format"
-  },
-  "[c]": {
-    "editor.formatOnSave": true,
-    "editor.defaultFormatter": "xaver.clang-format"
-  },
-  "[h]": {
-    "editor.formatOnSave": true,
-    "editor.defaultFormatter": "xaver.clang-format"
-  },
-  "[hpp]": {
-    "editor.formatOnSave": true,
-    "editor.defaultFormatter": "xaver.clang-format"
-  },
-
-  "[markdown]": {
-    "editor.wordWrap": "on",
-    "editor.formatOnSave": false
-  },
-  "[yaml]": {
-    "editor.formatOnSave": false
-  },
-  "[json]": {
-    "editor.formatOnSave": false
-  },
-  "[jsonc]": {
-    "editor.formatOnSave": false
-  },
-
-  "editor.tabSize": 4,
-  "editor.insertSpaces": true,
-  "editor.rulers": [100],
-
-  "terminal.integrated.defaultProfile.linux": "bash",
-  "remote.autoForwardPortsFallback": 0,
-
-  "leetcode.endpoint": "leetcode-cn",
-  "leetcode.workspaceFolder": "$LEETCODE_DIR",
-  "leetcode.defaultLanguage": "cpp",
-  "leetcode.filePath": {
-    "default": {
-      "folder": "",
-      "filename": "\${id}.\${kebab-case-name}.\${ext}"
-    }
-  },
-  "leetcode.hideSolved": true,
-  "leetcode.hint.commentDescription": false,
-  "leetcode.hint.commandShortcut": false,
-  "leetcode.hint.configWebviewMarkdown": false
-}
-EOF
-
-echo "已写入: $VSCODE_SETTINGS_FILE"
-
+echo "==> 生成结果"
+echo "LeetCode 目录:"
+echo "$LEETCODE_DIR"
 echo
-echo "==> 写入 LeetCode 目录专用 .clangd"
-cat > "$LEETCODE_DIR/.clangd" <<'EOF'
-CompileFlags:
-  Add:
-    - -std=c++17
-    - -Wall
-    - -Wextra
-    - -Wno-unused-variable
-    - -Wno-unused-parameter
-    - -Wno-unused-function
-    - -Wno-unused-but-set-variable
-    - -Wno-sign-compare
-    - -Wno-unknown-pragmas
-    - -Wno-unknown-warning-option
-    - -Wno-format
-    - -Wno-shadow
-
-Diagnostics:
-  Suppress:
-    - unused-includes
-    - missing-includes
-  ClangTidy:
-    Remove:
-      - "*"
-
-InlayHints:
-  ParameterNames: No
-  DeducedTypes: No
-EOF
-
-echo "已写入: $LEETCODE_DIR/.clangd"
-
+echo "Remote User Settings:"
+echo "$REMOTE_USER_SETTINGS_FILE"
 echo
-echo "==> 最终验证"
-echo
-echo "lcv user:"
-lcv user || true
-
-echo
-echo "生成的关键文件:"
-find "$WORKSPACE_DIR" -maxdepth 3 -type f \( -path "*/.vscode/settings.json" -o -name ".clangd" -o -name "$(basename "$0")" \) -print
+echo "关键文件:"
+find "$WORKSPACE_DIR" -maxdepth 3 -type f \( -name ".clangd" -o -name "$(basename "$0")" \) -print
+echo "$REMOTE_USER_SETTINGS_FILE"
 
 echo
 echo "========================================"
