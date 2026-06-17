@@ -3,6 +3,8 @@
 #include "server.h"
 #include "threadpool.h"
 #include <sys/select.h>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 class Selector {
@@ -24,6 +26,7 @@ private:
   fd_set read_set_;
   std::vector<int> client_fds_;
   std::vector<int> closed_fds_;
+  std::unordered_set<int> processing_fds_;
   TcpServer &tcp_server_;
   ThreadPool &pool_;
   int max_fd_;

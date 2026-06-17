@@ -45,7 +45,7 @@ static bool write_all(int fd, const char *buffer, ssize_t length) {
   return true;
 }
 
-void handle_business(int client_fd, const std::string &data) {
+std::string handle_business(int client_fd, const std::string &data) {
   {
     std::string msg = "工作线程启动，thread id = " +
                       std::to_string(std::hash<std::thread::id>{}(
@@ -60,14 +60,9 @@ void handle_business(int client_fd, const std::string &data) {
 
   log_info(msg);
 
-  /*
-   * Echo：
-   * 把收到的数据原样写回客户端。
-   */
-  if (!write_all(client_fd, data.c_str(), data.size())) {
-    log_error("write 失败，client_fd = " + std::to_string(client_fd) +
-              ", error = " + std::strerror(errno));
-  }
+  std::string response = data;
 
   log_info("工作线程处理结束，client_fd = " + std::to_string(client_fd));
+
+  return response;
 }
