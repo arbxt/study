@@ -29,7 +29,7 @@ Poller::~Poller() {
       poll_fds_[i].fd = -1;
     }
   }
-  write_buffers_.clear();
+  connections_.clear();
 }
 
 void Poller::loop() {
@@ -99,6 +99,7 @@ void Poller::handle_new_connection() {
     }
 
     poll_fds_.push_back({client_fd, POLLIN, 0});
+    connections_.emplace(client_fd);
 
     std::cout << "new client fd = " << client_fd << std::endl;
   }
@@ -109,43 +110,63 @@ bool Poller::handle_client_event(size_t idx) {
   int fd = poll_fds_[idx].fd;
   short ev = poll_fds_[idx].revents;
 
+  auto it = connections_.find(fd);
+  if (it == connections_.end()) {
+    close_clientfd(idx);
+    return true;
+  }
+
+  Connection &conn = it->second;
+
   if (ev & (POLLERR | POLLNVAL)) {
     close_clientfd(idx);
     return true;
   }
 
-  if (ev & POLLIN) {
+  if (ev & POLLHUP) {
+    conn.close_after_write = true;
+    std::cout << "fd " << fd << " POLLHUP, close_after_write=true\n";
+  }
 
+  if (ev & POLLIN) {
     char buffer[4096];
 
-    ssize_t n = read(fd, buffer, sizeof(buffer));
+    while (true) {
+      ssize_t n = read(fd, buffer, sizeof(buffer));
 
-    if (n > 0) {
-      std::string req(buffer, static_cast<size_t>(n));
-      std::string resp = handle_business(fd, req);
-      if (send_response(idx, resp)) {
-        return true;
+      if (n > 0) {
+        conn.read_buffer.append(buffer, static_cast<size_t>(n));
+        continue;
       }
-    } else if (n == 0) {
-      close_clientfd(idx);
-      return true;
-    } else {
+
+      if (n == 0) {
+        conn.close_after_write = true;
+        std::cout << "fd " << fd << " read EOF, close_after_write=true\n";
+        break;
+      }
+
       if (errno == EINTR) {
-        return false;
+        continue;
       }
 
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        break;
+      }
 
-      } else {
-        close_clientfd(idx);
+      close_clientfd(idx);
+      return true;
+    }
+
+    if (!conn.read_buffer.empty()) {
+      std::string req;
+      req.swap(conn.read_buffer);
+
+      std::string resp = handle_business(fd, req);
+
+      if (send_response(idx, resp)) {
         return true;
       }
     }
-  }
-
-  if (ev & POLLHUP) {
-    close_clientfd(idx);
-    return true;
   }
 
   if (ev & POLLOUT) {
@@ -153,23 +174,44 @@ bool Poller::handle_client_event(size_t idx) {
       return true;
     }
   }
+
+  if (conn.close_after_write && conn.write_buffer.empty()) {
+    close_clientfd(idx);
+    return true;
+  }
+
+  if (conn.close_after_write && !conn.write_buffer.empty()) {
+    poll_fds_[idx].events |= POLLOUT;
+  }
   return false;
 }
 
 bool Poller::send_response(size_t idx, const std::string &response) {
   int fd = poll_fds_[idx].fd;
 
+  auto it = connections_.find(fd);
+  if (it == connections_.end()) {
+    close_clientfd(idx);
+    return true;
+  }
+
+  Connection &conn = it->second;
+
   if (!response.empty()) {
-    write_buffers_[fd].append(response);
+    conn.write_buffer.append(response);
   }
 
-  auto it = write_buffers_.find(fd);
-  if (it == write_buffers_.end() || it->second.empty()) {
+  if (conn.write_buffer.empty()) {
     poll_fds_[idx].events &= ~POLLOUT;
-    return false;
+
+    if (conn.close_after_write) {
+      close_clientfd(idx);
+      return true;
+    }
+    return true;
   }
 
-  std::string &pending = it->second;
+  std::string &pending = conn.write_buffer;
 
   ssize_t n = shortWrite(fd, pending.data(), pending.size());
 
@@ -181,8 +223,14 @@ bool Poller::send_response(size_t idx, const std::string &response) {
   size_t written = static_cast<size_t>(n);
 
   if (written == pending.size()) {
-    write_buffers_.erase(fd);
+    pending.clear();
     poll_fds_[idx].events &= ~POLLOUT;
+
+    if (conn.close_after_write) {
+      close_clientfd(idx);
+      std::cout << "fd " << fd << " write done and close_after_write, close\n";
+      return true;
+    }
     return false;
   }
 
@@ -193,6 +241,8 @@ bool Poller::send_response(size_t idx, const std::string &response) {
   // written == 0 或只写了一部分：
   // 说明仍有数据没写完，继续监听 POLLOUT。
   poll_fds_[idx].events |= POLLOUT;
+  std::cout << "fd " << fd
+            << " enable POLLOUT, pending=" << conn.write_buffer.size() << "\n";
   return false;
 }
 
@@ -204,6 +254,6 @@ void Poller::close_clientfd(size_t idx) {
     std::cout << "clientfd " << fd << " closed" << std::endl;
   }
 
-  write_buffers_.erase(fd);
+  connections_.erase(fd);
   poll_fds_.erase(poll_fds_.begin() + static_cast<long>(idx));
 }
