@@ -14,23 +14,28 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-Poller::Poller(TcpServer &server) : server_(server) {
-  client_fds_.push_back({server.listen_fd(), POLLIN, 0});
+Poller::Poller(TcpServer &server)
+    : server_(server), listen_fd_(server.listen_fd()) {
+  poll_fds_.push_back({listen_fd_, POLLIN, 0});
 }
 
 Poller::~Poller() {
-  for (size_t i = 1; i < client_fds_.size(); ++i) {
-    if (client_fds_[i].fd >= 0) {
-      close(client_fds_[i].fd);
-      client_fds_[i].fd = -1;
+  for (size_t i = 0; i < poll_fds_.size(); ++i) {
+    if (poll_fds_[i].fd == listen_fd_) {
+      continue;
+    }
+    if (poll_fds_[i].fd >= 0) {
+      close(poll_fds_[i].fd);
+      poll_fds_[i].fd = -1;
     }
   }
+  write_buffers_.clear();
 }
 
 void Poller::loop() {
 
   while (true) {
-    int ready_count = poll(client_fds_.data(), client_fds_.size(), -1);
+    int ready_count = poll(poll_fds_.data(), poll_fds_.size(), -1);
 
     if (ready_count < 0) {
       if (errno == EINTR) {
@@ -44,24 +49,28 @@ void Poller::loop() {
       continue;
     }
 
-    if (client_fds_[0].revents & (POLLERR | POLLHUP | POLLNVAL)) {
-      std::cerr << "listen fd error, server will stop" << std::endl;
-      break;
-    }
-
-    if (client_fds_[0].revents & POLLIN) {
-      handle_new_connection();
-      --ready_count;
-    }
-
-    for (size_t i = 1; i < client_fds_.size() && ready_count > 0;) {
-      if (client_fds_[i].revents == 0) {
+    for (size_t i = 0; i < poll_fds_.size() && ready_count > 0;) {
+      if (poll_fds_[i].revents == 0) {
         ++i;
         continue;
       }
 
-      bool removed = handle_client_event(i);
       --ready_count;
+
+      if (poll_fds_[i].fd == listen_fd_) {
+        if (poll_fds_[i].revents & (POLLERR | POLLHUP | POLLNVAL)) {
+          std::cerr << "listen fd error, server will stop" << std::endl;
+          return;
+        }
+
+        if (poll_fds_[i].revents & POLLIN) {
+          handle_new_connection();
+        }
+
+        ++i;
+        continue;
+      }
+      bool removed = handle_client_event(i);
 
       // erase后vector前进一位，--i防止跳过元素
       if (!removed) {
@@ -89,7 +98,7 @@ void Poller::handle_new_connection() {
       continue;
     }
 
-    client_fds_.push_back({client_fd, POLLIN, 0});
+    poll_fds_.push_back({client_fd, POLLIN, 0});
 
     std::cout << "new client fd = " << client_fd << std::endl;
   }
@@ -97,8 +106,8 @@ void Poller::handle_new_connection() {
 
 bool Poller::handle_client_event(size_t idx) {
 
-  int fd = client_fds_[idx].fd;
-  short ev = client_fds_[idx].revents;
+  int fd = poll_fds_[idx].fd;
+  short ev = poll_fds_[idx].revents;
 
   if (ev & (POLLERR | POLLNVAL)) {
     close_clientfd(idx);
@@ -108,7 +117,6 @@ bool Poller::handle_client_event(size_t idx) {
   if (ev & POLLIN) {
 
     char buffer[4096];
-    std::memset(buffer, 0, sizeof(buffer));
 
     ssize_t n = read(fd, buffer, sizeof(buffer));
 
@@ -127,12 +135,17 @@ bool Poller::handle_client_event(size_t idx) {
       }
 
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
-        return false;
-      }
 
-      close_clientfd(idx);
-      return true;
+      } else {
+        close_clientfd(idx);
+        return true;
+      }
     }
+  }
+
+  if (ev & POLLHUP) {
+    close_clientfd(idx);
+    return true;
   }
 
   if (ev & POLLOUT) {
@@ -144,7 +157,7 @@ bool Poller::handle_client_event(size_t idx) {
 }
 
 bool Poller::send_response(size_t idx, const std::string &response) {
-  int fd = client_fds_[idx].fd;
+  int fd = poll_fds_[idx].fd;
 
   if (!response.empty()) {
     write_buffers_[fd].append(response);
@@ -152,11 +165,11 @@ bool Poller::send_response(size_t idx, const std::string &response) {
 
   auto it = write_buffers_.find(fd);
   if (it == write_buffers_.end() || it->second.empty()) {
-    client_fds_[idx].events &= ~POLLOUT;
+    poll_fds_[idx].events &= ~POLLOUT;
     return false;
   }
 
-  std::string pending = it->second;
+  std::string &pending = it->second;
 
   ssize_t n = shortWrite(fd, pending.data(), pending.size());
 
@@ -169,7 +182,7 @@ bool Poller::send_response(size_t idx, const std::string &response) {
 
   if (written == pending.size()) {
     write_buffers_.erase(fd);
-    client_fds_[idx].events &= ~POLLOUT;
+    poll_fds_[idx].events &= ~POLLOUT;
     return false;
   }
 
@@ -179,17 +192,18 @@ bool Poller::send_response(size_t idx, const std::string &response) {
 
   // written == 0 或只写了一部分：
   // 说明仍有数据没写完，继续监听 POLLOUT。
-  client_fds_[idx].events |= POLLOUT;
+  poll_fds_[idx].events |= POLLOUT;
   return false;
 }
 
 void Poller::close_clientfd(size_t idx) {
-  if (client_fds_[idx].fd >= 0) {
-    close(client_fds_[idx].fd);
-    std::cout << "clientfd " << client_fds_[idx].fd << " closed" << std::endl;
-    client_fds_[idx].fd = -1;
+  int fd = poll_fds_[idx].fd;
+  if (poll_fds_[idx].fd >= 0) {
+    close(poll_fds_[idx].fd);
+    poll_fds_[idx].fd = -1;
+    std::cout << "clientfd " << fd << " closed" << std::endl;
   }
 
-  write_buffers_.erase(client_fds_[idx].fd);
-  client_fds_.erase(client_fds_.begin() + static_cast<long>(idx));
+  write_buffers_.erase(fd);
+  poll_fds_.erase(poll_fds_.begin() + static_cast<long>(idx));
 }

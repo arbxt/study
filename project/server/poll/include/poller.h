@@ -22,6 +22,7 @@ private:
 
 private:
   TcpServer &server_;
-  std::vector<pollfd> client_fds_;
+  int listen_fd_;
+  std::vector<pollfd> poll_fds_;
   std::unordered_map<int, std::string> write_buffers_;
 };
