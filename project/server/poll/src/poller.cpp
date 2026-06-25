@@ -99,7 +99,7 @@ void Poller::handle_new_connection() {
     }
 
     poll_fds_.push_back({client_fd, POLLIN, 0});
-    connections_.emplace(client_fd);
+    connections_.emplace(client_fd, Connection{});
 
     std::cout << "new client fd = " << client_fd << std::endl;
   }

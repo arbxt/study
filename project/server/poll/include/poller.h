@@ -3,9 +3,16 @@
 #include "server.h"
 #include <cstddef>
 #include <poll.h>
+#include <string>
 #include <sys/poll.h>
 #include <unordered_map>
 #include <vector>
+
+struct Connection {
+  std::string read_buffer;
+  std::string write_buffer;
+  bool close_after_write = false;
+};
 
 class Poller {
 public:
@@ -24,5 +31,5 @@ private:
   TcpServer &server_;
   int listen_fd_;
   std::vector<pollfd> poll_fds_;
-  std::unordered_map<int, std::string> write_buffers_;
+  std::unordered_map<int, Connection> connections_;
 };
