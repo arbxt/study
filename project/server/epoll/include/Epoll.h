@@ -2,6 +2,7 @@
 
 #include "server.h"
 
+#include <cstdint>
 #include <string>
 #include <sys/epoll.h>
 #include <unordered_map>
@@ -30,4 +31,18 @@ private:
   int epoll_fd_;
 
   std::vector<epoll_event> events_;
+  std::unordered_map<int, Connection> connections_;
+
+private:
+  void add_fd(int fd, uint32_t events);
+  void mod_fd(int fd, uint32_t events);
+  void del_fd(int fd);
+
+  void handle_new_connection();
+  bool handle_client_events(int fd, uint32_t events);
+  bool send_response(int fd, const std::string response);
+  void close_client(int fd);
+
+  void enable_write(int fd);
+  void disable_write(int fd);
 };

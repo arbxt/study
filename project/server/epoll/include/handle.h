@@ -2,4 +2,4 @@
 
 #include <string>
 
-std::string handle_bussiness(std::string request);
+std::string handle_bussiness(const std::string request);

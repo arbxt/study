@@ -8,12 +8,6 @@
 #include <unordered_map>
 #include <vector>
 
-struct Connection {
-  std::string read_buffer;
-  std::string write_buffer;
-  bool close_after_write = false;
-};
-
 class Poller {
 public:
   explicit Poller(TcpServer &server);
@@ -28,6 +22,11 @@ private:
   bool send_response(size_t idx, const std::string &response);
 
 private:
+  struct Connection {
+    std::string read_buffer;
+    std::string write_buffer;
+    bool close_after_write = false;
+  };
   TcpServer &server_;
   int listen_fd_;
   std::vector<pollfd> poll_fds_;
