@@ -39,7 +39,7 @@ private:
   void del_fd(int fd);
 
   void handle_new_connection();
-  bool handle_client_events(int fd, uint32_t events);
+  void handle_client_events(int fd, uint32_t events);
   bool send_response(int fd, const std::string response);
   void close_client(int fd);
 
