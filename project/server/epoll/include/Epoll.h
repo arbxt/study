@@ -3,6 +3,7 @@
 #include "server.h"
 
 #include <cstdint>
+#include <ctime>
 #include <string>
 #include <sys/epoll.h>
 #include <unordered_map>
@@ -23,6 +24,8 @@ private:
     std::string read_buffer;
     std::string write_buffer;
     bool close_after_write = false;
+
+    time_t last_active = 0;
   };
 
 private:
@@ -40,7 +43,8 @@ private:
 
   void handle_new_connection();
   void handle_client_events(int fd, uint32_t events);
-  bool send_response(int fd, const std::string response);
+  void check_timeout_connections();
+  bool send_response(int fd, const std::string &response);
   void close_client(int fd);
 
   void enable_write(int fd);

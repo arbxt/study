@@ -8,11 +8,14 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <ctime>
 #include <iostream>
 #include <stdexcept>
 #include <sys/epoll.h>
 #include <sys/types.h>
 #include <unistd.h>
+
+static constexpr int kIdleTimeoutSeconds = 5;
 
 Epoller::Epoller(Tcpserver &server)
     : server_(server), listen_fd_(server.listen_fd()), epoll_fd_(-1),
@@ -22,7 +25,7 @@ Epoller::Epoller(Tcpserver &server)
     std::cerr << "epoll create1 failed:" << std::strerror(errno) << std::endl;
     throw std::runtime_error("epoll create failed");
   }
-  add_fd(listen_fd_, EPOLLIN);
+  add_fd(listen_fd_, EPOLLIN | EPOLLERR | EPOLLHUP);
 }
 
 Epoller::~Epoller() {
@@ -44,7 +47,7 @@ Epoller::~Epoller() {
 void Epoller::loop() {
   while (true) {
     int n = epoll_wait(epoll_fd_, events_.data(),
-                       static_cast<int>(events_.size()), -1);
+                       static_cast<int>(events_.size()), 1000);
 
     if (n < 0) {
       if (errno == EINTR) {
@@ -52,10 +55,6 @@ void Epoller::loop() {
       }
       std::cerr << "epoll_wait failed" << std::strerror(errno) << std::endl;
       break;
-    }
-
-    if (n == 0) {
-      continue;
     }
 
     for (int i = 0; i < n; ++i) {
@@ -75,6 +74,8 @@ void Epoller::loop() {
       }
       handle_client_events(fd, ev);
     }
+
+    check_timeout_connections();
   }
 }
 
@@ -100,7 +101,9 @@ void Epoller::handle_new_connection() {
       continue;
     }
 
-    auto ret = connections_.emplace(client_fd, Connection{});
+    Connection conn;
+    conn.last_active = std::time(nullptr);
+    auto ret = connections_.emplace(client_fd, conn);
     if (!ret.second) {
       std::cerr << "duplicate connection fd = " << client_fd << std::endl;
       close(client_fd);
@@ -116,7 +119,7 @@ void Epoller::handle_new_connection() {
 void Epoller::handle_client_events(int fd, uint32_t events) {
   auto it = connections_.find(fd);
   if (it == connections_.end()) {
-    close_client(fd);
+    del_fd(fd);
     return;
   }
 
@@ -141,12 +144,13 @@ void Epoller::handle_client_events(int fd, uint32_t events) {
 
       if (n > 0) {
         conn.read_buffer.append(buffer, static_cast<size_t>(n));
+        conn.last_active = std::time(nullptr);
         continue;
       }
 
       if (n == 0) {
         conn.close_after_write = true;
-        std::cout << "fd" << fd << "read EOF,close_after_writ=true"
+        std::cout << "fd " << fd << " read EOF,close_after_writ=true"
                   << std::endl;
         break;
       }
@@ -181,11 +185,33 @@ void Epoller::handle_client_events(int fd, uint32_t events) {
     }
   }
 
-  if (conn.close_after_write && conn.write_buffer.empty()) {
-    close_client(fd);
-  }
-  if (conn.close_after_write && !conn.write_buffer.empty()) {
+  if (conn.close_after_write) {
+    if (conn.write_buffer.empty()) {
+      close_client(fd);
+      return;
+    }
+
     enable_write(fd);
+  }
+}
+
+void Epoller::check_timeout_connections() {
+  time_t now = std::time(nullptr);
+
+  std::vector<int> expired_fds;
+
+  for (const auto &kv : connections_) {
+    int fd = kv.first;
+    const Connection &conn = kv.second;
+
+    if (now - conn.last_active > kIdleTimeoutSeconds) {
+      expired_fds.push_back(fd);
+    }
+  }
+
+  for (int fd : expired_fds) {
+    std::cout << "connection timeout, fd = " << fd << std::endl;
+    close_client(fd);
   }
 }
 
@@ -212,10 +238,10 @@ void Epoller::close_client(int fd) {
   connections_.erase(fd);
 }
 
-bool Epoller::send_response(int fd, const std::string response) {
+bool Epoller::send_response(int fd, const std::string &response) {
   auto it = connections_.find(fd);
   if (it == connections_.end()) {
-    close_client(fd);
+    del_fd(fd);
     return true;
   }
 
@@ -243,6 +269,10 @@ bool Epoller::send_response(int fd, const std::string response) {
   if (n < 0) {
     close_client(fd);
     return true;
+  }
+
+  if (n > 0) {
+    conn.last_active = std::time(nullptr);
   }
 
   size_t written = static_cast<size_t>(n);
