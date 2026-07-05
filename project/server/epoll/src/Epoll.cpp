@@ -1,5 +1,6 @@
 #include "Epoll.h"
 #include "handle.h"
+#include "http.h"
 #include "server.h"
 #include "utils.h"
 
@@ -166,17 +167,7 @@ void Epoller::handle_client_events(int fd, uint32_t events) {
       close_client(fd);
       return;
     }
-
-    if (!conn.read_buffer.empty()) {
-      std::string req;
-      req.swap(conn.read_buffer);
-
-      std::string resp = handle_bussiness(req);
-
-      if (send_response(fd, resp)) {
-        return;
-      }
-    }
+    process_http_buffer(fd, conn);
   }
 
   if (events & EPOLLOUT) {
@@ -236,6 +227,40 @@ void Epoller::close_client(int fd) {
   }
 
   connections_.erase(fd);
+}
+
+void Epoller::process_http_buffer(int fd, Connection &conn) {
+  while (true) {
+    ParseResult result = try_parse_http_request(conn.read_buffer);
+
+    if (result.status == ParseStatus::Incomplete) {
+      break;
+    }
+
+    if (result.status == ParseStatus::Error) {
+      std::string resp = make_http_response(400, "Bad Request\n", "text/plain");
+
+      conn.close_after_write = true;
+
+      if (send_response(fd, resp)) {
+        return;
+      }
+
+      break;
+    }
+
+    std::string resp = handle_http_request(result.request);
+
+    conn.read_buffer.erase(0, result.consumed);
+
+    conn.close_after_write = true;
+
+    if (send_response(fd, resp)) {
+      return;
+    }
+
+    break;
+  }
 }
 
 bool Epoller::send_response(int fd, const std::string &response) {

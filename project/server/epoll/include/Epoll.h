@@ -44,6 +44,7 @@ private:
   void handle_new_connection();
   void handle_client_events(int fd, uint32_t events);
   void check_timeout_connections();
+  void process_http_buffer(int fd, Connection &conn);
   bool send_response(int fd, const std::string &response);
   void close_client(int fd);
 
