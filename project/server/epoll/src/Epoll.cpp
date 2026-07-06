@@ -16,7 +16,7 @@
 #include <sys/types.h>
 #include <unistd.h>
 
-static constexpr int kIdleTimeoutSeconds = 5;
+static constexpr int kIdleTimeoutSeconds = 60;
 
 Epoller::Epoller(Tcpserver &server)
     : server_(server), listen_fd_(server.listen_fd()), epoll_fd_(-1),
@@ -238,7 +238,8 @@ void Epoller::process_http_buffer(int fd, Connection &conn) {
     }
 
     if (result.status == ParseStatus::Error) {
-      std::string resp = make_http_response(400, "Bad Request\n", "text/plain");
+      std::string resp =
+          make_http_response(400, "Bad Request\n", "text/plain", false);
 
       conn.close_after_write = true;
 
@@ -249,17 +250,22 @@ void Epoller::process_http_buffer(int fd, Connection &conn) {
       break;
     }
 
-    std::string resp = handle_http_request(result.request);
+    bool keep_alive = should_keep_alive(result.request);
+    std::string resp = handle_http_request(result.request, keep_alive);
 
     conn.read_buffer.erase(0, result.consumed);
 
-    conn.close_after_write = true;
+    if (!keep_alive) {
+      conn.close_after_write = true;
+    }
 
     if (send_response(fd, resp)) {
       return;
     }
 
-    break;
+    if (!keep_alive) {
+      break;
+    }
   }
 }
 
