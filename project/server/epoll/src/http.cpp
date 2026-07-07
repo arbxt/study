@@ -2,9 +2,128 @@
 #include <cctype>
 #include <cstddef>
 #include <http.h>
+#include <limits>
 #include <string>
 
 static constexpr size_t kMaxRequestHeadSize = 8192;
+static constexpr size_t kMaxRequestBodySize = 1024 * 1024 * 8;
+
+static bool parse_request_line(const std::string &line, HttpRequest &req) {
+  size_t first_space = line.find(' ');
+  if (first_space == std::string::npos) {
+
+    return false;
+  }
+
+  size_t second_space = line.find(' ', first_space + 1);
+  if (second_space == std::string::npos) {
+    return false;
+  }
+  req.method = line.substr(0, first_space);
+  req.path = line.substr(first_space + 1, second_space - first_space - 1);
+  req.version = line.substr(second_space + 1);
+
+  if (req.method.empty() || req.path.empty() || req.version.empty()) {
+    return false;
+  }
+
+  if (req.version != "HTTP/1.0" && req.version != "HTTP/1.1") {
+    return false;
+  }
+
+  return true;
+}
+
+static bool parse_header(const std::string &head_part, HttpRequest &req) {
+  size_t line_start(0);
+  size_t line_end(0);
+  size_t end_pos(head_part.size());
+
+  while (line_start < end_pos) {
+    line_end = head_part.find("\r\n", line_start);
+    if (line_end == std::string::npos || line_end > end_pos) {
+      return false;
+    }
+    std::string line = head_part.substr(line_start, line_end - line_start);
+
+    if (line.empty()) {
+      break;
+    }
+
+    size_t colon_pos = line.find(":");
+    if (colon_pos == std::string::npos) {
+      return false;
+    }
+
+    std::string key = line.substr(0, colon_pos);
+    std::string value = line.substr(colon_pos + 1);
+
+    key = to_lower(trim(key));
+    value = trim(value);
+
+    if (key.empty()) {
+      return false;
+    }
+
+    req.headers[key] = value;
+
+    line_start = line_end + 2;
+  }
+  return true;
+}
+
+/*
+static bool parse_content_length(const std::string &s, size_t &out) {
+  if (s.empty())
+    return false;
+
+  // 不允许负数
+  if (s[0] == '-')
+    return false;
+
+  try {
+    std::size_t pos = 0;
+
+    unsigned long value = std::stoul(s, &pos);
+
+    if (pos != s.size())
+      return false;
+
+    out = static_cast<size_t>(value);
+
+    return true;
+  } catch (const std::invalid_argument &) {
+    return false;
+  } catch (const std::out_of_range &) {
+    return false;
+  }
+}
+  */
+
+static bool parse_content_length(const std::string &s, size_t &out) {
+  if (s.empty()) {
+    return false;
+  }
+
+  size_t value = 0;
+
+  for (char ch : s) {
+    if (ch < '0' || ch > '9') {
+      return false;
+    }
+
+    size_t digit = static_cast<size_t>(ch - '0');
+
+    if (value > (std::numeric_limits<size_t>::max() - digit) / 10) {
+      return false;
+    }
+
+    value = value * 10 + digit;
+  }
+
+  out = value;
+  return true;
+}
 
 ParseResult try_parse_http_request(const std::string &buffer) {
   ParseResult result;
@@ -13,17 +132,18 @@ ParseResult try_parse_http_request(const std::string &buffer) {
 
   // 1. 找到 HTTP 头部区域结束：请求行 + headers + 空行
   size_t head_end_pos = buffer.find("\r\n\r\n");
-  if (head_end_pos == std::string::npos) {
-    return result; // 请求还没收完整
-  }
 
-  if (buffer.size() > kMaxRequestHeadSize &&
-      buffer.find("\r\n\r\n") == std::string::npos) {
-    result.status = ParseStatus::Error;
+  if (head_end_pos == std::string::npos) {
+    if (buffer.size() > kMaxRequestHeadSize) {
+      result.status = ParseStatus::Error;
+    }
     return result;
   }
 
-  size_t consumed = head_end_pos + 4;
+  if (head_end_pos > kMaxRequestHeadSize) {
+    result.status = ParseStatus::Error;
+    return result;
+  }
 
   // 2. 请求行
   size_t line_start = 0;
@@ -34,73 +154,53 @@ ParseResult try_parse_http_request(const std::string &buffer) {
   }
 
   std::string request_line = buffer.substr(0, line_end);
-
-  // 3. 请求行格式：METHOD SP PATH SP VERSION
-  size_t first_space = request_line.find(' ');
-  if (first_space == std::string::npos) {
-    result.status = ParseStatus::Error;
-    return result;
-  }
-
-  size_t second_space = request_line.find(' ', first_space + 1);
-  if (second_space == std::string::npos) {
-    result.status = ParseStatus::Error;
-    return result;
-  }
-
   HttpRequest req;
-  req.method = request_line.substr(0, first_space);
-  req.path =
-      request_line.substr(first_space + 1, second_space - first_space - 1);
-  req.version = request_line.substr(second_space + 1);
 
-  if (req.method.empty() || req.path.empty() || req.version.empty()) {
+  if (!parse_request_line(request_line, req)) {
     result.status = ParseStatus::Error;
     return result;
   }
 
-  if (req.version != "HTTP/1.0" && req.version != "HTTP/1.1") {
-    result.status = ParseStatus::Error;
-    return result;
-  }
-
+  std::string header = buffer.substr(line_end + 2, head_end_pos - line_end - 2);
   // 请求头
-  line_start = line_end + 2;
-
-  while (line_start < head_end_pos) {
-    line_end = buffer.find("\r\n", line_start);
-    if (line_end == std::string::npos || line_end > head_end_pos) {
-      result.status = ParseStatus::Error;
-      return result;
-    }
-
-    std::string line = buffer.substr(line_start, line_end - line_start);
-
-    if (line.empty()) {
-      break;
-    }
-
-    size_t colon_pos = line.find(":");
-    if (colon_pos == std::string::npos) {
-      result.status = ParseStatus::Error;
-      return result;
-    }
-
-    std::string key = line.substr(0, colon_pos);
-    std::string value = line.substr(colon_pos + 1);
-
-    key = to_lower(trim(key));
-    value = trim(value);
-
-    if (key.empty()) {
-      result.status = ParseStatus::Error;
-      return result;
-    }
-
-    req.headers[key] = value;
-
-    line_start = line_end + 2;
+  if (!parse_header(header, req)) {
+    result.status = ParseStatus::Error;
+    return result;
   }
+
+  size_t body_size = 0;
+
+  std::string cl = get_header(req, "content-length");
+  if (!cl.empty()) {
+    if (!parse_content_length(cl, body_size)) {
+      result.status = ParseStatus::Error;
+      return result;
+    }
+  }
+
+  if (req.method == "POST" && cl.empty()) {
+    result.status = ParseStatus::Error;
+    return result;
+  }
+
+  if (body_size > kMaxRequestBodySize) {
+    result.status = ParseStatus::Error;
+    return result;
+  }
+
+  std::string body = buffer.substr(head_end_pos + 4, body_size);
+
+  if (body.size() < body_size) {
+    return result;
+  }
+  req.body = body;
+
+  if (body_size > std::numeric_limits<size_t>::max() - head_end_pos - 4) {
+    result.status = ParseStatus::Error;
+    return result;
+  }
+
+  size_t consumed = head_end_pos + 4 + body_size;
 
   result.status = ParseStatus::Complete;
   result.request = req;
@@ -140,26 +240,6 @@ std::string make_http_response(int status_code, const std::string &body,
 
   response += body;
   return response;
-}
-
-std::string handle_http_request(const HttpRequest &req, bool keep_alive) {
-  if (req.method != "GET") {
-    return make_http_response(405, "Method Not Allowed\n", "text/plain", false);
-  }
-
-  if (req.path == "/") {
-    return make_http_response(200, "Hello, world!\n", "text/plain", keep_alive);
-  }
-
-  if (req.path == "/ping") {
-    return make_http_response(200, "pong\n", "text/plain", keep_alive);
-  }
-
-  if (req.path == "/status") {
-    return make_http_response(200, "OK\n", "text/plain", keep_alive);
-  }
-
-  return make_http_response(404, "Not Found\n", "text/plain", false);
 }
 
 std::string get_header(const HttpRequest &req, const std::string &key) {
@@ -220,6 +300,8 @@ std::string status_message(int status_code) {
     return "Internal Server Error";
   case 405:
     return "Method Not Allowed";
+  case 400:
+    return "Bad Request";
   default:
     return "Unknown";
   }

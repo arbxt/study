@@ -1,6 +1,6 @@
 #include "Epoll.h"
-#include "handle.h"
 #include "http.h"
+#include "router.h"
 #include "server.h"
 #include "utils.h"
 
@@ -104,14 +104,18 @@ void Epoller::handle_new_connection() {
 
     Connection conn;
     conn.last_active = std::time(nullptr);
-    auto ret = connections_.emplace(client_fd, conn);
-    if (!ret.second) {
-      std::cerr << "duplicate connection fd = " << client_fd << std::endl;
+
+    if (!add_fd(client_fd, EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP)) {
       close(client_fd);
       continue;
     }
 
-    add_fd(client_fd, EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP);
+    auto ret = connections_.emplace(client_fd, std::move(conn));
+    if (!ret.second) {
+      del_fd(client_fd);
+      close(client_fd);
+      continue;
+    }
 
     std::cout << "new client fd = " << client_fd << std::endl;
   }
@@ -229,12 +233,12 @@ void Epoller::close_client(int fd) {
   connections_.erase(fd);
 }
 
-void Epoller::process_http_buffer(int fd, Connection &conn) {
+bool Epoller::process_http_buffer(int fd, Connection &conn) {
   while (true) {
     ParseResult result = try_parse_http_request(conn.read_buffer);
 
     if (result.status == ParseStatus::Incomplete) {
-      break;
+      return false;
     }
 
     if (result.status == ParseStatus::Error) {
@@ -244,10 +248,10 @@ void Epoller::process_http_buffer(int fd, Connection &conn) {
       conn.close_after_write = true;
 
       if (send_response(fd, resp)) {
-        return;
+        return true;
       }
 
-      break;
+      return false;
     }
 
     bool keep_alive = should_keep_alive(result.request);
@@ -260,11 +264,11 @@ void Epoller::process_http_buffer(int fd, Connection &conn) {
     }
 
     if (send_response(fd, resp)) {
-      return;
+      return true;
     }
 
     if (!keep_alive) {
-      break;
+      return false;
     }
   }
 }
@@ -336,15 +340,18 @@ void Epoller::disable_write(int fd) {
   mod_fd(fd, EPOLLIN | EPOLLERR | EPOLLHUP | EPOLLRDHUP);
 }
 
-void Epoller::add_fd(int fd, uint32_t events) {
+bool Epoller::add_fd(int fd, uint32_t events) {
   epoll_event ev{};
   ev.events = events;
   ev.data.fd = fd;
 
   if (epoll_ctl(epoll_fd_, EPOLL_CTL_ADD, fd, &ev) < 0) {
-    std::cerr << "epoll_ctl add failed,fd=" << fd << ",error"
-              << std::strerror(errno) << std::endl;
+    std::cerr << "epoll_ctl ADD failed, fd = " << fd
+              << ", error: " << std::strerror(errno) << std::endl;
+    return false;
   }
+
+  return true;
 }
 
 void Epoller::mod_fd(int fd, uint32_t events) {

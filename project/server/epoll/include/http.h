@@ -1,3 +1,5 @@
+#pragma once
+
 #include <iostream>
 #include <unordered_map>
 
@@ -8,6 +10,7 @@ struct HttpRequest {
   std::string path;
   std::string version;
   std::unordered_map<std::string, std::string> headers;
+  std::string body;
 };
 
 struct ParseResult {
@@ -21,8 +24,6 @@ ParseResult try_parse_http_request(const std::string &buffer);
 std::string make_http_response(int status_code, const std::string &body,
                                const std::string &content_type,
                                bool keep_alive);
-
-std::string handle_http_request(const HttpRequest &req, bool keep_alive);
 
 std::string status_message(int status_code);
 
