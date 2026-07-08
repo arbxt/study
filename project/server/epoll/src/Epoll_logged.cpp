@@ -125,21 +125,37 @@ void Epoller::handle_new_connection() {
 void Epoller::handle_client_events(int fd, uint32_t events) {
   auto it = connections_.find(fd);
   if (it == connections_.end()) {
+    std::cout << "[event] fd=" << fd
+              << " no connection state, delete from epoll" << std::endl;
     del_fd(fd);
     return;
   }
 
   Connection &conn = it->second;
 
+  std::cout << "[event] fd=" << fd
+            << " events=" << events
+            << " in=" << static_cast<bool>(events & EPOLLIN)
+            << " out=" << static_cast<bool>(events & EPOLLOUT)
+            << " err=" << static_cast<bool>(events & EPOLLERR)
+            << " hup=" << static_cast<bool>(events & EPOLLHUP)
+            << " rdhup=" << static_cast<bool>(events & EPOLLRDHUP)
+            << " read_buffer=" << conn.read_buffer.size()
+            << " write_buffer=" << conn.write_buffer.size()
+            << " close_after_write=" << conn.close_after_write
+            << std::endl;
+
   if (events & EPOLLERR) {
+    std::cout << "[event] fd=" << fd << " EPOLLERR, close immediately"
+              << std::endl;
     close_client(fd);
     return;
   }
 
   if (events & (EPOLLRDHUP | EPOLLHUP)) {
     conn.close_after_write = true;
-    std::cout << "fd " << fd << " hup/rdhup, close_after_write=true"
-              << std::endl;
+    std::cout << "[event] fd=" << fd
+              << " hup/rdhup, close_after_write=true" << std::endl;
   }
 
   if (events & EPOLLIN) {
@@ -151,31 +167,52 @@ void Epoller::handle_client_events(int fd, uint32_t events) {
       if (n > 0) {
         conn.read_buffer.append(buffer, static_cast<size_t>(n));
         conn.last_active = std::time(nullptr);
+
+        std::cout << "[read] fd=" << fd
+                  << " n=" << n
+                  << " read_buffer_size=" << conn.read_buffer.size()
+                  << std::endl;
+
         continue;
       }
 
       if (n == 0) {
         conn.close_after_write = true;
-        std::cout << "fd " << fd << " read EOF,close_after_writ=true"
-                  << std::endl;
+        std::cout << "[read EOF] fd=" << fd
+                  << " read_buffer_size=" << conn.read_buffer.size()
+                  << " write_buffer_size=" << conn.write_buffer.size()
+                  << " close_after_write=true" << std::endl;
         break;
       }
 
       if (errno == EINTR) {
+        std::cout << "[read] fd=" << fd << " interrupted by signal, retry"
+                  << std::endl;
         continue;
       }
 
       if (errno == EAGAIN || errno == EWOULDBLOCK) {
+        std::cout << "[read done] fd=" << fd
+                  << " read_buffer_size=" << conn.read_buffer.size()
+                  << std::endl;
         break;
       }
 
+      std::cerr << "[read error] fd=" << fd
+                << " error=" << std::strerror(errno) << std::endl;
       close_client(fd);
       return;
     }
-    process_http_buffer(fd, conn);
+
+    if (process_http_buffer(fd, conn)) {
+      return;
+    }
   }
 
   if (events & EPOLLOUT) {
+    std::cout << "[event] fd=" << fd
+              << " EPOLLOUT, try flush write_buffer="
+              << conn.write_buffer.size() << std::endl;
     if (send_response(fd, "")) {
       return;
     }
@@ -183,10 +220,15 @@ void Epoller::handle_client_events(int fd, uint32_t events) {
 
   if (conn.close_after_write) {
     if (conn.write_buffer.empty()) {
+      std::cout << "[close after write] fd=" << fd
+                << " write_buffer empty, close now" << std::endl;
       close_client(fd);
       return;
     }
 
+    std::cout << "[close after write] fd=" << fd
+              << " pending=" << conn.write_buffer.size()
+              << ", enable EPOLLOUT" << std::endl;
     enable_write(fd);
   }
 }
@@ -206,7 +248,19 @@ void Epoller::check_timeout_connections() {
   }
 
   for (int fd : expired_fds) {
-    std::cout << "connection timeout, fd = " << fd << std::endl;
+    auto it = connections_.find(fd);
+    if (it != connections_.end()) {
+      std::cout << "[timeout] fd=" << fd
+                << " idle_seconds=" << (now - it->second.last_active)
+                << " read_buffer=" << it->second.read_buffer.size()
+                << " write_buffer=" << it->second.write_buffer.size()
+                << " close_after_write=" << it->second.close_after_write
+                << std::endl;
+    } else {
+      std::cout << "[timeout] fd=" << fd << " no connection state"
+                << std::endl;
+    }
+
     close_client(fd);
   }
 }
@@ -222,13 +276,25 @@ void Epoller::close_client(int fd) {
     return;
   }
 
+  auto it = connections_.find(fd);
+  if (it != connections_.end()) {
+    std::cout << "[close_client] fd=" << fd
+              << " read_buffer=" << it->second.read_buffer.size()
+              << " write_buffer=" << it->second.write_buffer.size()
+              << " close_after_write=" << it->second.close_after_write
+              << std::endl;
+  } else {
+    std::cout << "[close_client] fd=" << fd
+              << " no connection state" << std::endl;
+  }
+
   del_fd(fd);
 
   if (close(fd) < 0) {
     std::cerr << "close client fd failed, fd = " << fd
               << ", error: " << std::strerror(errno) << std::endl;
   } else {
-    std::cout << "client fd " << fd << " closed" << std::endl;
+    std::cout << "[close_client] fd=" << fd << " closed" << std::endl;
   }
 
   connections_.erase(fd);
@@ -238,13 +304,25 @@ bool Epoller::process_http_buffer(int fd, Connection &conn) {
   int processed = 0;
 
   while (processed < kMaxRequestsPerEvent) {
+    std::cout << "[process begin] fd=" << fd
+              << " read_buffer_size=" << conn.read_buffer.size()
+              << " processed=" << processed << std::endl;
+
     ParseResult result = try_parse_http_request(conn.read_buffer);
 
     if (result.status == ParseStatus::Incomplete) {
+      std::cout << "[parse incomplete] fd=" << fd
+                << " read_buffer_size=" << conn.read_buffer.size()
+                << std::endl;
       return false;
     }
 
     if (result.status == ParseStatus::Error) {
+      std::cout << "[parse error] fd=" << fd
+                << " read_buffer_size=" << conn.read_buffer.size()
+                << " preview=[" << conn.read_buffer.substr(0, 120) << "]"
+                << std::endl;
+
       std::string resp =
           make_http_response(400, "Bad Request\n", "text/plain", false);
 
@@ -258,6 +336,11 @@ bool Epoller::process_http_buffer(int fd, Connection &conn) {
     }
 
     if (result.consumed == 0 || result.consumed > conn.read_buffer.size()) {
+      std::cout << "[parse invalid consumed] fd=" << fd
+                << " consumed=" << result.consumed
+                << " read_buffer_size=" << conn.read_buffer.size()
+                << std::endl;
+
       std::string resp =
           make_http_response(400, "Bad Request\n", "text/plain", false);
 
@@ -273,22 +356,31 @@ bool Epoller::process_http_buffer(int fd, Connection &conn) {
     bool keep_alive = should_keep_alive(result.request);
     std::string resp = handle_http_request(result.request, keep_alive);
 
-    std::cout << "[http] fd=" << fd << " " << result.request.method << " "
-              << result.request.path
+    std::cout << "[parse complete] fd=" << fd
+              << " method=" << result.request.method
+              << " path=" << result.request.path
               << " body_size=" << result.request.body.size()
-              << " consumed=" << result.consumed << " keep_alive=" << keep_alive
-              << " read_buffer_before=" << conn.read_buffer.size() << std::endl;
+              << " consumed=" << result.consumed
+              << " keep_alive=" << keep_alive
+              << " read_buffer_before=" << conn.read_buffer.size()
+              << std::endl;
 
     conn.read_buffer.erase(0, result.consumed);
 
-    std::cout << "[http] fd=" << fd
-              << " read_buffer_after=" << conn.read_buffer.size() << std::endl;
+    std::cout << "[after erase] fd=" << fd
+              << " read_buffer_after=" << conn.read_buffer.size()
+              << std::endl;
 
     if (!keep_alive) {
       conn.close_after_write = true;
+      std::cout << "[http] fd=" << fd
+                << " keep_alive=false, close_after_write=true"
+                << std::endl;
     }
 
     if (send_response(fd, resp)) {
+      std::cout << "[http] fd=" << fd
+                << " send_response asked caller to stop" << std::endl;
       return true;
     }
 
@@ -299,12 +391,18 @@ bool Epoller::process_http_buffer(int fd, Connection &conn) {
     }
   }
 
+  std::cout << "[process limit reached] fd=" << fd
+            << " processed=" << processed
+            << " remain=" << conn.read_buffer.size() << std::endl;
+
   return false;
 }
 
 bool Epoller::send_response(int fd, const std::string &response) {
   auto it = connections_.find(fd);
   if (it == connections_.end()) {
+    std::cout << "[send_response] fd=" << fd
+              << " no connection state, delete from epoll" << std::endl;
     del_fd(fd);
     return true;
   }
@@ -312,13 +410,22 @@ bool Epoller::send_response(int fd, const std::string &response) {
   Connection &conn = it->second;
 
   if (!response.empty()) {
+    std::cout << "[send_response] fd=" << fd
+              << " append=" << response.size()
+              << " write_buffer_before=" << conn.write_buffer.size()
+              << std::endl;
     conn.write_buffer.append(response);
   }
 
   if (conn.write_buffer.empty()) {
+    std::cout << "[send_response] fd=" << fd
+              << " write_buffer empty" << std::endl;
     disable_write(fd);
 
     if (conn.close_after_write) {
+      std::cout << "[send_response] fd=" << fd
+                << " close_after_write=true and nothing to write"
+                << std::endl;
       close_client(fd);
       return true;
     }
@@ -327,10 +434,14 @@ bool Epoller::send_response(int fd, const std::string &response) {
   }
 
   std::string &pending = conn.write_buffer;
+  size_t pending_before = pending.size();
 
   ssize_t n = shortWrite(fd, pending.data(), pending.size());
 
   if (n < 0) {
+    std::cerr << "[write error] fd=" << fd
+              << " pending=" << pending_before
+              << " error=" << std::strerror(errno) << std::endl;
     close_client(fd);
     return true;
   }
@@ -341,9 +452,17 @@ bool Epoller::send_response(int fd, const std::string &response) {
 
   size_t written = static_cast<size_t>(n);
 
+  std::cout << "[write] fd=" << fd
+            << " pending_before=" << pending_before
+            << " written=" << written << std::endl;
+
   if (written == pending.size()) {
     pending.clear();
     disable_write(fd);
+
+    std::cout << "[write complete] fd=" << fd
+              << " close_after_write=" << conn.close_after_write
+              << std::endl;
 
     if (conn.close_after_write) {
       close_client(fd);
@@ -356,6 +475,10 @@ bool Epoller::send_response(int fd, const std::string &response) {
   if (written > 0) {
     pending.erase(0, written);
   }
+
+  std::cout << "[write partial] fd=" << fd
+            << " remain=" << pending.size()
+            << ", enable EPOLLOUT" << std::endl;
 
   enable_write(fd);
   return false;

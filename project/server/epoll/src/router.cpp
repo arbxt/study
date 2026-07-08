@@ -64,5 +64,11 @@ std::string handle_http_request(const HttpRequest &req, bool keep_alive) {
     return method_not_allowed(keep_alive);
   }
 
+  if (req.path == "/api/echo") {
+    if (req.method == "POST") {
+      return handle_api_echo(req, keep_alive);
+    }
+  }
+
   return not_found(keep_alive);
 }

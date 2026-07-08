@@ -6,7 +6,7 @@
 #include <string>
 
 static constexpr size_t kMaxRequestHeadSize = 8192;
-static constexpr size_t kMaxRequestBodySize = 1024 * 1024 * 8;
+static constexpr size_t kMaxRequestBodySize = 1024 * 1024 * 1;
 
 static bool parse_request_line(const std::string &line, HttpRequest &req) {
   size_t first_space = line.find(' ');
@@ -153,7 +153,7 @@ ParseResult try_parse_http_request(const std::string &buffer) {
     return result;
   }
 
-  std::string request_line = buffer.substr(0, line_end);
+  std::string request_line = buffer.substr(line_start, line_end);
   HttpRequest req;
 
   if (!parse_request_line(request_line, req)) {
@@ -161,7 +161,7 @@ ParseResult try_parse_http_request(const std::string &buffer) {
     return result;
   }
 
-  std::string header = buffer.substr(line_end + 2, head_end_pos - line_end - 2);
+  std::string header = buffer.substr(line_end + 2, head_end_pos - line_end);
   // 请求头
   if (!parse_header(header, req)) {
     result.status = ParseStatus::Error;
