@@ -19,7 +19,15 @@ struct ParseResult {
   size_t consumed = 0;
 };
 
-ParseResult try_parse_http_request(const std::string &buffer);
+struct HttpResponse {
+  int status_code = 200;
+  std::string body;
+  std::string content_type = "text/plain";
+  bool keep_alive = true;
+};
+
+ParseResult try_parse_http_request(const std::string &buffer,
+                                   size_t max_head_size, size_t max_body_size);
 
 std::string make_http_response(int status_code, const std::string &body,
                                const std::string &content_type,

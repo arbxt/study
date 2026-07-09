@@ -5,9 +5,6 @@
 #include <limits>
 #include <string>
 
-static constexpr size_t kMaxRequestHeadSize = 8192;
-static constexpr size_t kMaxRequestBodySize = 1024 * 1024 * 1;
-
 static bool parse_request_line(const std::string &line, HttpRequest &req) {
   size_t first_space = line.find(' ');
   if (first_space == std::string::npos) {
@@ -125,7 +122,8 @@ static bool parse_content_length(const std::string &s, size_t &out) {
   return true;
 }
 
-ParseResult try_parse_http_request(const std::string &buffer) {
+ParseResult try_parse_http_request(const std::string &buffer,
+                                   size_t max_head_size, size_t max_body_size) {
   ParseResult result;
   result.status = ParseStatus::Incomplete;
   result.consumed = 0;
@@ -134,13 +132,13 @@ ParseResult try_parse_http_request(const std::string &buffer) {
   size_t head_end_pos = buffer.find("\r\n\r\n");
 
   if (head_end_pos == std::string::npos) {
-    if (buffer.size() > kMaxRequestHeadSize) {
+    if (buffer.size() > max_head_size) {
       result.status = ParseStatus::Error;
     }
     return result;
   }
 
-  if (head_end_pos > kMaxRequestHeadSize) {
+  if (head_end_pos > max_head_size) {
     result.status = ParseStatus::Error;
     return result;
   }
@@ -183,7 +181,7 @@ ParseResult try_parse_http_request(const std::string &buffer) {
     return result;
   }
 
-  if (body_size > kMaxRequestBodySize) {
+  if (body_size > max_body_size) {
     result.status = ParseStatus::Error;
     return result;
   }

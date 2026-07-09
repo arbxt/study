@@ -1,5 +1,6 @@
 #pragma once
 
+#include "config.h"
 #include "server.h"
 
 #include <cstdint>
@@ -11,7 +12,7 @@
 
 class Epoller {
 public:
-  explicit Epoller(Tcpserver &server);
+  explicit Epoller(Tcpserver &server, const ServerConfig &config);
   ~Epoller();
 
   Epoller(const Epoller &) = delete;
@@ -29,6 +30,7 @@ private:
   };
 
 private:
+  const ServerConfig &config_;
   Tcpserver &server_;
   int listen_fd_;
   int epoll_fd_;
