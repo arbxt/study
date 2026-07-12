@@ -1,74 +1,95 @@
 #include "router.h"
-#include "http.h"
 
-static std::string handle_ping(const HttpRequest &req, bool keep_alive) {
+#include <unordered_map>
+
+namespace {
+
+using Handler = std::string (*)(const HttpRequest &req, bool keep_alive);
+
+using MethodTable = std::unordered_map<std::string, Handler>;
+using RouteTable = std::unordered_map<std::string, MethodTable>;
+
+std::string handle_root(const HttpRequest &req, bool keep_alive) {
   (void)req;
+
+  return make_http_response(200, "Hello, world!\n", "text/plain", keep_alive);
+}
+
+std::string handle_ping(const HttpRequest &req, bool keep_alive) {
+  (void)req;
+
   return make_http_response(200, "pong\n", "text/plain", keep_alive);
 }
 
-static std::string handle_status(const HttpRequest &req, bool keep_alive) {
+std::string handle_status(const HttpRequest &req, bool keep_alive) {
   (void)req;
+
   return make_http_response(200, "OK\n", "text/plain", keep_alive);
 }
 
-static std::string handle_echo(const HttpRequest &req, bool keep_alive) {
+std::string handle_echo(const HttpRequest &req, bool keep_alive) {
   return make_http_response(200, req.body, "text/plain", keep_alive);
 }
 
-static std::string handle_api_echo(const HttpRequest &req, bool keep_alive) {
+std::string handle_api_echo(const HttpRequest &req, bool keep_alive) {
   std::string body = "{\"echo\":\"" + req.body + "\"}\n";
 
   return make_http_response(200, body, "application/json", keep_alive);
 }
 
-static std::string method_not_allowed(bool keep_alive) {
-  return make_http_response(405, "Method Not Allowed", "text/plain",
+std::string not_found(bool keep_alive) {
+  return make_http_response(404, "Not Found\n", "text/plain", keep_alive);
+}
+
+std::string method_not_allowed(bool keep_alive) {
+  return make_http_response(405, "Method Not Allowed\n", "text/plain",
                             keep_alive);
 }
 
-static std::string not_found(bool keep_alive) {
-  return make_http_response(404, "Not Found", "text/plain", keep_alive);
+const RouteTable &routes() {
+  static const RouteTable table = [] {
+    RouteTable t;
+
+    t["/"]["GET"] = handle_root;
+    t["/ping"]["GET"] = handle_ping;
+    t["/status"]["GET"] = handle_status;
+    t["/echo"]["POST"] = handle_echo;
+    t["/api/echo"]["POST"] = handle_api_echo;
+
+    return t;
+  }();
+
+  return table;
 }
 
+} // namespace
+
 std::string handle_http_request(const HttpRequest &req, bool keep_alive) {
-  if (req.path == "/") {
-    if (req.method == "GET") {
-      return make_http_response(200, "Hello, world!\n", "text/plain",
-                                keep_alive);
-    }
+  const RouteTable &table = routes();
+
+  auto path_it = table.find(req.path);
+
+  if (path_it == table.end()) {
+    std::cout << "[router] 404 method=" << req.method << " path=" << req.path
+              << std::endl;
+
+    return not_found(keep_alive);
+  }
+
+  const MethodTable &methods = path_it->second;
+
+  auto method_it = methods.find(req.method);
+
+  if (method_it == methods.end()) {
+    std::cout << "[router] 405 method=" << req.method << " path=" << req.path
+              << std::endl;
 
     return method_not_allowed(keep_alive);
   }
 
-  if (req.path == "/ping") {
-    if (req.method == "GET") {
-      return handle_ping(req, keep_alive);
-    }
+  std::cout << "[router] dispatch method=" << req.method << " path=" << req.path
+            << std::endl;
 
-    return method_not_allowed(keep_alive);
-  }
-
-  if (req.path == "/status") {
-    if (req.method == "GET") {
-      return handle_status(req, keep_alive);
-    }
-
-    return method_not_allowed(keep_alive);
-  }
-
-  if (req.path == "/echo") {
-    if (req.method == "POST") {
-      return handle_echo(req, keep_alive);
-    }
-
-    return method_not_allowed(keep_alive);
-  }
-
-  if (req.path == "/api/echo") {
-    if (req.method == "POST") {
-      return handle_api_echo(req, keep_alive);
-    }
-  }
-
-  return not_found(keep_alive);
+  Handler handler = method_it->second;
+  return handler(req, keep_alive);
 }

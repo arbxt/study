@@ -300,6 +300,8 @@ std::string status_message(int status_code) {
     return "Method Not Allowed";
   case 400:
     return "Bad Request";
+  case 201:
+    return "Created";
   default:
     return "Unknown";
   }

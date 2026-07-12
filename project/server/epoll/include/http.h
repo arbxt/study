@@ -33,6 +33,8 @@ std::string make_http_response(int status_code, const std::string &body,
                                const std::string &content_type,
                                bool keep_alive);
 
+std::string make_http_response(const HttpResponse &resp);
+
 std::string status_message(int status_code);
 
 bool should_keep_alive(const HttpRequest &req);
