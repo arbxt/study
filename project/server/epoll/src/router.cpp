@@ -1,4 +1,6 @@
 #include "router.h"
+#include "http.h"
+#include "item_service.h"
 
 #include <unordered_map>
 
@@ -46,6 +48,35 @@ std::string method_not_allowed(bool keep_alive) {
                             keep_alive);
 }
 
+std::string handle_add_item(const HttpRequest &req, bool keep_alive) {
+  if (req.body.empty()) {
+    return make_http_response(400, "Item cannot be empty\n", "text/plain",
+                              keep_alive);
+  }
+  bool ok = ItemService::instance().add_item(req.body);
+
+  if (!ok) {
+    return make_http_response(400, "Invalid item\n", "text/plain", keep_alive);
+  }
+
+  return make_http_response(201, req.body, "text/plain", keep_alive);
+}
+
+std::string handle_get_items(const HttpRequest &req, bool keep_alive) {
+  (void)req;
+
+  std::vector<std::string> items = ItemService::instance().get_items();
+
+  std::string body;
+
+  for (const std::string &item : items) {
+    body += item;
+    body += "\n";
+  }
+
+  return make_http_response(200, body, "text/plain", keep_alive);
+}
+
 const RouteTable &routes() {
   static const RouteTable table = [] {
     RouteTable t;
@@ -55,6 +86,8 @@ const RouteTable &routes() {
     t["/status"]["GET"] = handle_status;
     t["/echo"]["POST"] = handle_echo;
     t["/api/echo"]["POST"] = handle_api_echo;
+    t["/api/items"]["GET"] = handle_get_items;
+    t["/api/items"]["POST"] = handle_add_item;
 
     return t;
   }();
