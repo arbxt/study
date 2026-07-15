@@ -1,4 +1,5 @@
 #include "item_service.h"
+#include "item.h"
 #include <string>
 #include <vector>
 
@@ -7,12 +8,18 @@ ItemService &ItemService::instance() {
   return service;
 }
 
-bool ItemService::add_item(const std::string &item) {
-  if (item.empty()) {
+bool ItemService::add_item(const Item &item) {
+  Item new_item = item;
+
+  if (new_item.name.empty()) {
     return false;
   }
-  item_.push_back(item);
+
+  new_item.id = next_id_++;
+
+  item_.push_back(new_item);
+
   return true;
 }
 
-std::vector<std::string> ItemService::get_items() const { return item_; }
+std::vector<Item> ItemService::get_items() const { return item_; }

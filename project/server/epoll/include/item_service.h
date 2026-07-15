@@ -1,4 +1,5 @@
 #pragma once
+#include "item.h"
 
 #include <string>
 #include <vector>
@@ -7,8 +8,8 @@ class ItemService {
 public:
   static ItemService &instance();
 
-  bool add_item(const std::string &item);
-  std::vector<std::string> get_items() const;
+  bool add_item(const Item &item);
+  std::vector<Item> get_items() const;
 
 private:
   ItemService() = default;
@@ -17,5 +18,6 @@ private:
   ItemService &operator=(const ItemService &) = delete;
 
 private:
-  std::vector<std::string> item_;
+  std::vector<Item> item_;
+  int next_id_ = 1;
 };

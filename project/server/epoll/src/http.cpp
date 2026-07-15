@@ -1,11 +1,14 @@
+#include "http.h"
+
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
-#include <http.h>
 #include <limits>
 #include <string>
 
-static bool parse_request_line(const std::string &line, HttpRequest &req) {
+namespace {
+
+bool parse_request_line(const std::string &line, HttpRequest &req) {
   size_t first_space = line.find(' ');
   if (first_space == std::string::npos) {
 
@@ -31,7 +34,7 @@ static bool parse_request_line(const std::string &line, HttpRequest &req) {
   return true;
 }
 
-static bool parse_header(const std::string &head_part, HttpRequest &req) {
+bool parse_header(const std::string &head_part, HttpRequest &req) {
   size_t line_start(0);
   size_t line_end(0);
   size_t end_pos(head_part.size());
@@ -70,7 +73,7 @@ static bool parse_header(const std::string &head_part, HttpRequest &req) {
 }
 
 /*
-static bool parse_content_length(const std::string &s, size_t &out) {
+ bool parse_content_length(const std::string &s, size_t &out) {
   if (s.empty())
     return false;
 
@@ -97,7 +100,7 @@ static bool parse_content_length(const std::string &s, size_t &out) {
 }
   */
 
-static bool parse_content_length(const std::string &s, size_t &out) {
+bool parse_content_length(const std::string &s, size_t &out) {
   if (s.empty()) {
     return false;
   }
@@ -121,6 +124,8 @@ static bool parse_content_length(const std::string &s, size_t &out) {
   out = value;
   return true;
 }
+
+} // namespace
 
 ParseResult try_parse_http_request(const std::string &buffer,
                                    size_t max_head_size, size_t max_body_size) {
