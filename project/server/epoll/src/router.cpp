@@ -1,6 +1,7 @@
 #include "router.h"
 #include "http.h"
 #include "item_service.h"
+#include "json.h"
 
 #include <unordered_map>
 
@@ -49,32 +50,24 @@ std::string method_not_allowed(bool keep_alive) {
 }
 
 std::string handle_add_item(const HttpRequest &req, bool keep_alive) {
-  if (req.body.empty()) {
-    return make_http_response(400, "Item cannot be empty\n", "text/plain",
-                              keep_alive);
-  }
-  bool ok = ItemService::instance().add_item(req.body);
+  Item item;
 
-  if (!ok) {
-    return make_http_response(400, "Invalid item\n", "text/plain", keep_alive);
+  if (!Json::parse_item(req.body, item)) {
+    return make_http_response(400, "{\"error\":\"invalid json\"}",
+                              "application/json", keep_alive);
   }
 
-  return make_http_response(201, req.body, "text/plain", keep_alive);
+  ItemService::instance().add_item(item);
+
+  return make_http_response(201, Json::serialize_item(item), "application/json",
+                            keep_alive);
 }
 
 std::string handle_get_items(const HttpRequest &req, bool keep_alive) {
-  (void)req;
+  auto items = ItemService::instance().get_items();
 
-  std::vector<std::string> items = ItemService::instance().get_items();
-
-  std::string body;
-
-  for (const std::string &item : items) {
-    body += item;
-    body += "\n";
-  }
-
-  return make_http_response(200, body, "text/plain", keep_alive);
+  return make_http_response(200, Json::serialize_items(items),
+                            "application/json", keep_alive);
 }
 
 const RouteTable &routes() {
