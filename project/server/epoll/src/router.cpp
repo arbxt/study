@@ -64,6 +64,7 @@ std::string handle_add_item(const HttpRequest &req, bool keep_alive) {
 }
 
 std::string handle_get_items(const HttpRequest &req, bool keep_alive) {
+  (void)req;
   auto items = ItemService::instance().get_items();
 
   return make_http_response(200, Json::serialize_items(items),

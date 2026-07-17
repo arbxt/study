@@ -1,6 +1,6 @@
 #include "json.h"
 
-bool parse_item(const std::string &json, Item &item) {
+bool Json::parse_item(const std::string &json, Item &item) {
   auto pos = json.find("\"name\"");
 
   if (pos == std::string::npos)
@@ -48,7 +48,7 @@ std::string Json::serialize_items(const std::vector<Item> &items) {
 
   json += "[";
 
-  for (const auto item : items) {
+  for (const auto &item : items) {
     json += serialize_item(item);
   }
 
