@@ -8,18 +8,19 @@ ItemService &ItemService::instance() {
   return service;
 }
 
-bool ItemService::add_item(const Item &item) {
-  Item new_item = item;
-
-  if (new_item.name.empty()) {
-    return false;
+int ItemService::add_item(const std::string &name) {
+  if (name.empty()) {
+    return -1;
   }
 
-  new_item.id = next_id_++;
+  Item item;
 
-  item_.push_back(new_item);
+  item.id = next_id_++;
+  item.name = name;
 
-  return true;
+  item_.push_back(item);
+
+  return item.id;
 }
 
 std::vector<Item> ItemService::get_items() const { return item_; }

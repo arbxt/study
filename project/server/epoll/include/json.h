@@ -7,7 +7,7 @@
 
 namespace Json {
 
-bool parse_item(const std::string &json, Item &item);
+bool parse_json(const std::string &json, std::string &name);
 
 std::string serialize_item(const Item &item);
 

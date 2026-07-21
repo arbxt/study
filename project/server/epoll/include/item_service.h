@@ -8,7 +8,7 @@ class ItemService {
 public:
   static ItemService &instance();
 
-  bool add_item(const Item &item);
+  int add_item(const std::string &name);
   std::vector<Item> get_items() const;
 
 private:

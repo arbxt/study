@@ -307,6 +307,8 @@ std::string status_message(int status_code) {
     return "Bad Request";
   case 201:
     return "Created";
+  case 415:
+    return "Unsupported Media Type";
   default:
     return "Unknown";
   }
