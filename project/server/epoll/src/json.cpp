@@ -1,4 +1,5 @@
 #include "json.h"
+#include <cstddef>
 
 namespace {
 std::string escape_json_string(const std::string &input) {
@@ -112,9 +113,34 @@ bool parse_json_string(const std::string &s, size_t start, std::string &out) {
 
   return false;
 }
+
+bool find_key(const std::string &json, const std::string &key, size_t &pos) {
+  const std::string target = "\"" + key + "\"";
+  pos = json.find(target);
+
+  if (pos == std::string::npos) {
+    return false;
+  }
+
+  pos += target.size();
+
+  return true;
+}
+
+void skip_space(const std::string &json, size_t &pos) {
+  while (pos < json.size()) {
+    char c = json[pos];
+
+    if (c == ' ' || c == '\t' || c == '\n' || c == '\r') {
+      pos++;
+    } else {
+      break;
+    }
+  }
+}
 } // namespace
 
-bool parse_item(const std::string &json, Item &item) {
+bool Json::parse_item(const std::string &json, Item &item) {
   size_t pos = 0;
 
   // 找name字段

@@ -1,5 +1,6 @@
 #include "router.h"
 #include "http.h"
+#include "item.h"
 #include "item_service.h"
 #include "json.h"
 
@@ -52,27 +53,21 @@ std::string method_not_allowed(bool keep_alive) {
 }
 
 std::string handle_add_item(const HttpRequest &req, bool keep_alive) {
-  std::string name;
+  Item item;
 
-  if (!Json::parse_json(req.body, name)) {
+  if (!Json::parse_item(req.body, item)) {
     return make_http_response(400, "{\"error\":\"invalid json\"}",
                               "application/json", keep_alive);
   }
 
-  std::cout << name << std::endl;
-
-  int id = ItemService::instance().add_item(name);
+  int id = ItemService::instance().add_item(item.name);
 
   if (id < 0) {
-    std::cout << id << std::endl;
     return make_http_response(400, "{\"error\":\"invalid item\"}",
                               "application/json", keep_alive);
   }
 
-  Item item;
-
   item.id = id;
-  item.name = name;
 
   return make_http_response(201, Json::serialize_item(item), "application/json",
                             keep_alive);
